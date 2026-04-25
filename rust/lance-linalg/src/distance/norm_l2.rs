@@ -9,9 +9,7 @@ use arrow_array::types::{Float16Type, Float32Type, Float64Type};
 use arrow_schema::DataType;
 use half::{bf16, f16};
 #[allow(unused_imports)]
-use lance_core::utils::cpu::SIMD_SUPPORT;
-#[cfg(feature = "fp16kernels")]
-use lance_core::utils::cpu::SimdSupport;
+use lance_core::utils::cpu::{SIMD_SUPPORT, SimdSupport};
 use num_traits::{AsPrimitive, Float, Num};
 
 /// L2 normalization
@@ -145,11 +143,75 @@ impl Normalize for f64 {
     }
 }
 
-/// Explicit SIMD implementation of L2 norm for f64.
+/// L2 norm for f64. Runtime-dispatched to the best available backend.
 ///
-/// Two-level unrolling: f64x8 main loop, f64x4 remainder, scalar tail.
+/// On x86_64, dispatches via `SIMD_SUPPORT` to either an AVX2-targeted
+/// kernel (which carries `#[target_feature(enable = "avx,avx2,fma")]` so it
+/// stays correct under any compile baseline) or a portable scalar fallback.
+/// On aarch64 and loongarch64, the SIMD primitives in `crate::simd::f64` are
+/// unconditionally backed by NEON / LSX-LASX respectively, so no runtime gate
+/// is required.
 #[inline]
 pub fn norm_l2_f64_simd(vector: &[f64]) -> f32 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        match *SIMD_SUPPORT {
+            SimdSupport::Avx2 | SimdSupport::Avx512 | SimdSupport::Avx512FP16 => unsafe {
+                x86::norm_l2_f64_avx2(vector)
+            },
+            _ => norm_l2_f64_scalar(vector),
+        }
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        norm_l2_f64_simd_other(vector)
+    }
+}
+
+/// Portable scalar L2 norm. Used as the x86_64 fallback when no AVX2 is
+/// detected, and exposed for cross-backend parity testing.
+#[cfg(target_arch = "x86_64")]
+#[inline]
+fn norm_l2_f64_scalar(vector: &[f64]) -> f32 {
+    vector.iter().map(|v| v * v).sum::<f64>().sqrt() as f32
+}
+
+#[cfg(target_arch = "x86_64")]
+mod x86 {
+    use crate::simd::f64::{f64x4, f64x8};
+    use crate::simd::{FloatSimd, SIMD};
+
+    /// AVX2 + FMA L2 norm for f64. Two-level unrolling: f64x8 main loop,
+    /// f64x4 remainder, scalar tail.
+    ///
+    /// Caller must ensure the host supports AVX2 + FMA (gated by the
+    /// `SIMD_SUPPORT` match in `super::norm_l2_f64_simd`).
+    #[target_feature(enable = "avx,avx2,fma")]
+    pub unsafe fn norm_l2_f64_avx2(vector: &[f64]) -> f32 {
+        let dim = vector.len();
+        let unrolled_len = dim / 8 * 8;
+
+        let mut acc8 = f64x8::zeros();
+        for i in (0..unrolled_len).step_by(8) {
+            let v = f64x8::load_unaligned(vector.as_ptr().add(i));
+            acc8.multiply_add(v, v);
+        }
+
+        let aligned_len = dim / 4 * 4;
+        let mut acc4 = f64x4::zeros();
+        for i in (unrolled_len..aligned_len).step_by(4) {
+            let v = f64x4::load_unaligned(vector.as_ptr().add(i));
+            acc4.multiply_add(v, v);
+        }
+
+        let tail: f64 = vector[aligned_len..].iter().map(|&v| v * v).sum();
+        (acc8.reduce_sum() + acc4.reduce_sum() + tail).sqrt() as f32
+    }
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+#[inline]
+fn norm_l2_f64_simd_other(vector: &[f64]) -> f32 {
     use crate::simd::f64::{f64x4, f64x8};
     use crate::simd::{FloatSimd, SIMD};
 
@@ -290,6 +352,20 @@ mod tests {
         #[test]
         fn test_l2_norm_f64(data in prop::collection::vec(arbitrary_f64(), 4..4048)){
             do_norm_l2_test(&data)?;
+        }
+
+        /// Cross-backend parity: scalar fallback must match the dispatched
+        /// SIMD path within numerical tolerance. Exercises `norm_l2_f64_scalar`
+        /// directly so future baseline-lowering work has CI coverage of the
+        /// fallback path before any global RUSTFLAGS change.
+        #[cfg(target_arch = "x86_64")]
+        #[test]
+        fn test_l2_norm_f64_scalar_simd_parity(
+            data in prop::collection::vec(arbitrary_f64(), 4..4048)
+        ) {
+            let scalar = norm_l2_f64_scalar(&data);
+            let simd = norm_l2_f64_simd(&data);
+            prop_assert!(approx::relative_eq!(scalar, simd, max_relative = 1e-6));
         }
     }
 }
