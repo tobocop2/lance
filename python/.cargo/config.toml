@@ -27,6 +27,10 @@ rustflags = [
 # AVX2 / FMA kernels in lance-linalg now carry their own
 # #[target_feature(enable="avx,avx2,fma")] annotations and dispatch via
 # SIMD_SUPPORT at runtime, so they remain fast on AVX2-capable hardware.
+#
+# Note: clippy lint flags for the Python crate live under
+# `[target.'cfg(all())']` above so they merge across all targets. The
+# `target-cpu` flag is target-specific.
 rustflags = ["-C", "target-cpu=x86-64-v2"]
 
 [target.aarch64-apple-darwin]

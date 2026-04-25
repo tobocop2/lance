@@ -20,7 +20,13 @@ codegen-units = 16
 # AVX2 / FMA kernels in lance-linalg now carry their own
 # #[target_feature(enable="avx,avx2,fma")] annotations and dispatch via
 # SIMD_SUPPORT at runtime, so they remain fast on AVX2-capable hardware.
-rustflags = ["-C", "target-cpu=x86-64-v2"]
+#
+# `-D warnings` lives here (not in the workflow `env:` block) because cargo
+# precedence rules make a process-level `RUSTFLAGS` env var fully replace the
+# `[target.*]` rustflags from `.cargo/config.toml` rather than merge with
+# them. Setting `RUSTFLAGS=-D warnings` in CI would silently drop the
+# `target-cpu=x86-64-v2` baseline.
+rustflags = ["-C", "target-cpu=x86-64-v2", "-D", "warnings"]
 
 [target.aarch64-apple-darwin]
 rustflags = ["-C", "target-cpu=apple-m1", "-C", "target-feature=+neon,+fp16,+fhm,+dotprod"]

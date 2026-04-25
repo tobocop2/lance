@@ -90,8 +90,10 @@ jobs:
       # Need up-to-date compilers for kernels
       CC: clang
       CXX: clang++
-      # Treat warnings as errors to catch issues early
-      RUSTFLAGS: "-D warnings"
+      # `-D warnings` lives in `.cargo/config.toml` next to the
+      # `target-cpu=x86-64-v2` baseline so cargo merges them. Setting a
+      # process-level `RUSTFLAGS` here would override (not merge with) the
+      # config-file rustflags and silently drop the v2 compile baseline.
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       # pin the toolchain version to avoid surprises (ethnum 1.5.2
