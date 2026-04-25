@@ -222,27 +222,19 @@ impl Cosine for f32 {
 
     #[inline]
     fn cosine_with_norms(x: &[Self], x_norm: Self, y_norm: Self, y: &[Self]) -> Self {
-        let dim = x.len();
-        let unrolled_len = dim / 16 * 16;
-        let mut xy16 = f32x16::zeros();
-        for i in (0..unrolled_len).step_by(16) {
-            unsafe {
-                let x = f32x16::load_unaligned(x.as_ptr().add(i));
-                let y = f32x16::load_unaligned(y.as_ptr().add(i));
-                xy16.multiply_add(x, y);
+        #[cfg(target_arch = "x86_64")]
+        {
+            match *SIMD_SUPPORT {
+                SimdSupport::Avx2 | SimdSupport::Avx512 | SimdSupport::Avx512FP16 => unsafe {
+                    f32_x86::cosine_with_norms_avx2(x, x_norm, y_norm, y)
+                },
+                _ => cosine_scalar_fast(x, x_norm, y, y_norm),
             }
         }
-        let aligned_len = dim / 8 * 8;
-        let mut xy8 = f32x8::zeros();
-        for i in (unrolled_len..aligned_len).step_by(8) {
-            unsafe {
-                let x = f32x8::load_unaligned(x.as_ptr().add(i));
-                let y = f32x8::load_unaligned(y.as_ptr().add(i));
-                xy8.multiply_add(x, y);
-            }
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            cosine_with_norms_f32_simd_other(x, x_norm, y_norm, y)
         }
-        let xy = xy16.reduce_sum() + xy8.reduce_sum() + dot(&x[aligned_len..], &y[aligned_len..]);
-        1.0 - xy / x_norm / y_norm
     }
 
     fn cosine_batch<'a>(
@@ -309,6 +301,27 @@ mod f32_x86 {
             xy16.reduce_sum() + xy8.reduce_sum() + dot(&x[aligned_len..], &other[aligned_len..]);
         1.0 - xy / x_norm / y_norm.sqrt()
     }
+
+    #[target_feature(enable = "avx,avx2,fma")]
+    pub unsafe fn cosine_with_norms_avx2(x: &[f32], x_norm: f32, y_norm: f32, y: &[f32]) -> f32 {
+        let dim = x.len();
+        let unrolled_len = dim / 16 * 16;
+        let mut xy16 = f32x16::zeros();
+        for i in (0..unrolled_len).step_by(16) {
+            let xv = f32x16::load_unaligned(x.as_ptr().add(i));
+            let yv = f32x16::load_unaligned(y.as_ptr().add(i));
+            xy16.multiply_add(xv, yv);
+        }
+        let aligned_len = dim / 8 * 8;
+        let mut xy8 = f32x8::zeros();
+        for i in (unrolled_len..aligned_len).step_by(8) {
+            let xv = f32x8::load_unaligned(x.as_ptr().add(i));
+            let yv = f32x8::load_unaligned(y.as_ptr().add(i));
+            xy8.multiply_add(xv, yv);
+        }
+        let xy = xy16.reduce_sum() + xy8.reduce_sum() + dot(&x[aligned_len..], &y[aligned_len..]);
+        1.0 - xy / x_norm / y_norm
+    }
 }
 
 #[cfg(not(target_arch = "x86_64"))]
@@ -341,6 +354,32 @@ fn cosine_fast_f32_simd_other(x: &[f32], x_norm: f32, other: &[f32]) -> f32 {
         y_norm16.reduce_sum() + y_norm8.reduce_sum() + norm_l2(&other[aligned_len..]).powi(2);
     let xy = xy16.reduce_sum() + xy8.reduce_sum() + dot(&x[aligned_len..], &other[aligned_len..]);
     1.0 - xy / x_norm / y_norm.sqrt()
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+#[inline]
+fn cosine_with_norms_f32_simd_other(x: &[f32], x_norm: f32, y_norm: f32, y: &[f32]) -> f32 {
+    let dim = x.len();
+    let unrolled_len = dim / 16 * 16;
+    let mut xy16 = f32x16::zeros();
+    for i in (0..unrolled_len).step_by(16) {
+        unsafe {
+            let xv = f32x16::load_unaligned(x.as_ptr().add(i));
+            let yv = f32x16::load_unaligned(y.as_ptr().add(i));
+            xy16.multiply_add(xv, yv);
+        }
+    }
+    let aligned_len = dim / 8 * 8;
+    let mut xy8 = f32x8::zeros();
+    for i in (unrolled_len..aligned_len).step_by(8) {
+        unsafe {
+            let xv = f32x8::load_unaligned(x.as_ptr().add(i));
+            let yv = f32x8::load_unaligned(y.as_ptr().add(i));
+            xy8.multiply_add(xv, yv);
+        }
+    }
+    let xy = xy16.reduce_sum() + xy8.reduce_sum() + dot(&x[aligned_len..], &y[aligned_len..]);
+    1.0 - xy / x_norm / y_norm
 }
 
 impl Cosine for f64 {
@@ -630,6 +669,23 @@ mod tests {
             let x_norm = norm_l2(&x);
             let scalar = cosine_scalar(&x, x_norm, &y);
             let simd = <f32 as Cosine>::cosine_fast(&x, x_norm, &y);
+            prop_assert!(approx::relative_eq!(scalar, simd, max_relative = 1e-5));
+        }
+
+        /// Cross-backend parity for the f32 cosine_with_norms kernel. The
+        /// scalar fallback (`cosine_scalar_fast`) and the SIMD path must
+        /// agree within numerical tolerance.
+        #[cfg(target_arch = "x86_64")]
+        #[test]
+        fn test_cosine_with_norms_f32_scalar_simd_parity(
+            (x, y) in arbitrary_vector_pair(arbitrary_f32, 4..4048)
+        ) {
+            prop_assume!(norm_l2(&x) > 1e-10);
+            prop_assume!(norm_l2(&y) > 1e-10);
+            let x_norm = norm_l2(&x);
+            let y_norm = norm_l2(&y);
+            let scalar = cosine_scalar_fast(&x, x_norm, &y, y_norm);
+            let simd = <f32 as Cosine>::cosine_with_norms(&x, x_norm, y_norm, &y);
             prop_assert!(approx::relative_eq!(scalar, simd, max_relative = 1e-5));
         }
     }
