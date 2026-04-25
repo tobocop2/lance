@@ -15,7 +15,12 @@ lto = "thin"
 codegen-units = 16
 
 [target.x86_64-unknown-linux-gnu]
-rustflags = ["-C", "target-cpu=haswell", "-C", "target-feature=+avx2,+fma,+f16c"]
+# Lowered from haswell to x86-64-v2 so the binary runs on pre-Haswell CPUs
+# (Sandy Bridge / Ivy Bridge), which only guarantee SSE4.2 globally. Hot
+# AVX2 / FMA kernels in lance-linalg now carry their own
+# #[target_feature(enable="avx,avx2,fma")] annotations and dispatch via
+# SIMD_SUPPORT at runtime, so they remain fast on AVX2-capable hardware.
+rustflags = ["-C", "target-cpu=x86-64-v2"]
 
 [target.aarch64-apple-darwin]
 rustflags = ["-C", "target-cpu=apple-m1", "-C", "target-feature=+neon,+fp16,+fhm,+dotprod"]

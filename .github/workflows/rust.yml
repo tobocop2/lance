@@ -255,6 +255,34 @@ jobs:
       - name: Check benchmarks
         run: cargo check --profile ci --benches
 
+  linux-qemu-nehalem:
+    # Verify lance-linalg's runtime SIMD dispatch under emulation of a
+    # pre-Haswell x86_64 CPU (no AVX, no AVX2, no FMA). The compile baseline
+    # is x86-64-v2 so the binary must run on Nehalem; the AVX2 kernels in
+    # lance-linalg are guarded by SIMD_SUPPORT runtime checks and must take
+    # the scalar fallback path here.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CC: clang
+      CXX: clang++
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: "qemu-x86_64 -cpu Nehalem"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Setup rust toolchain
+        run: |
+          rustup toolchain install stable
+          rustup default stable
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y protobuf-compiler libssl-dev qemu-user qemu-user-static
+      - name: Run lance-linalg tests under qemu Nehalem
+        # Scope to lance-linalg: it owns the SIMD dispatch; running the full
+        # workspace under qemu would be prohibitively slow.
+        run: cargo test --release -p lance-linalg --lib
+
   msrv:
     # Check the minimum supported Rust version
     name: MSRV Check - Rust v${{ matrix.msrv }}
