@@ -734,6 +734,10 @@ mod tests {
 
     #[test]
     fn test_f64x4_basic_ops() {
+        #[cfg(target_arch = "x86_64")]
+        if !std::is_x86_feature_detected!("avx2") {
+            return;
+        }
         let a = [1.0_f64, 2.0, 3.0, 4.0];
         let b = [5.0_f64, 6.0, 7.0, 8.0];
 
@@ -755,6 +759,10 @@ mod tests {
 
     #[test]
     fn test_f64x4_fma() {
+        #[cfg(target_arch = "x86_64")]
+        if !std::is_x86_feature_detected!("avx2") {
+            return;
+        }
         let a = [1.0_f64, 2.0, 3.0, 4.0];
         let b = [2.0_f64, 3.0, 4.0, 5.0];
 
@@ -767,6 +775,10 @@ mod tests {
 
     #[test]
     fn test_f64x4_min() {
+        #[cfg(target_arch = "x86_64")]
+        if !std::is_x86_feature_detected!("avx2") {
+            return;
+        }
         let a = [1.0_f64, 5.0, 2.0, 8.0];
         let b = [3.0_f64, 2.0, 4.0, 1.0];
         let simd_a: f64x4 = (&a).into();
@@ -779,6 +791,10 @@ mod tests {
 
     #[test]
     fn test_f64x8_basic_ops() {
+        #[cfg(target_arch = "x86_64")]
+        if !std::is_x86_feature_detected!("avx2") {
+            return;
+        }
         let a: [f64; 8] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
         let b: [f64; 8] = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0];
 
@@ -797,6 +813,10 @@ mod tests {
 
     #[test]
     fn test_f64x8_fma() {
+        #[cfg(target_arch = "x86_64")]
+        if !std::is_x86_feature_detected!("avx2") {
+            return;
+        }
         let a: [f64; 8] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
         let b: [f64; 8] = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
 
@@ -810,6 +830,10 @@ mod tests {
 
     #[test]
     fn test_f64x8_min() {
+        #[cfg(target_arch = "x86_64")]
+        if !std::is_x86_feature_detected!("avx2") {
+            return;
+        }
         let a: [f64; 8] = [5.0, 1.0, 8.0, 3.0, 9.0, 2.0, 7.0, 4.0];
         let b: [f64; 8] = [2.0, 6.0, 3.0, 7.0, 1.0, 8.0, 4.0, 9.0];
         let simd_a: f64x8 = (&a).into();

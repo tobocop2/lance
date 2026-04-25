@@ -881,6 +881,10 @@ mod tests {
 
     #[test]
     fn test_basic_ops() {
+        #[cfg(target_arch = "x86_64")]
+        if !std::is_x86_feature_detected!("avx2") {
+            return;
+        }
         let a = (0..8).map(|f| f as f32).collect::<Vec<_>>();
         let b = (10..18).map(|f| f as f32).collect::<Vec<_>>();
 
@@ -918,6 +922,10 @@ mod tests {
 
     #[test]
     fn test_f32x8_cmp_ops() {
+        #[cfg(target_arch = "x86_64")]
+        if !std::is_x86_feature_detected!("avx2") {
+            return;
+        }
         let a = [1.0_f32, 2.0, 5.0, 6.0, 7.0, 3.0, 2.0, 1.0];
         let b = [2.0_f32, 1.0, 4.0, 5.0, 9.0, 5.0, 6.0, 2.0];
         let c = [2.0_f32, 1.0, 4.0, 5.0, 7.0, 3.0, 2.0, 1.0];
@@ -942,6 +950,10 @@ mod tests {
 
     #[test]
     fn test_basic_f32x16_ops() {
+        #[cfg(target_arch = "x86_64")]
+        if !std::is_x86_feature_detected!("avx2") {
+            return;
+        }
         let a = (0..16).map(|f| f as f32).collect::<Vec<_>>();
         let b = (10..26).map(|f| f as f32).collect::<Vec<_>>();
 
@@ -976,6 +988,10 @@ mod tests {
 
     #[test]
     fn test_f32x16_cmp_ops() {
+        #[cfg(target_arch = "x86_64")]
+        if !std::is_x86_feature_detected!("avx2") {
+            return;
+        }
         let a = [
             1.0_f32, 2.0, 5.0, 6.0, 7.0, 3.0, 2.0, 1.0, -0.5, 5.0, 6.0, 7.0, 8.0, 9.0, 1.0, 2.0,
         ];
@@ -1009,6 +1025,10 @@ mod tests {
 
     #[test]
     fn test_f32x8_gather() {
+        #[cfg(target_arch = "x86_64")]
+        if !std::is_x86_feature_detected!("avx2") {
+            return;
+        }
         let a = (0..256).map(|f| f as f32).collect::<Vec<_>>();
         let idx = [0_i32, 4, 8, 12, 16, 20, 24, 29];
         let v = f32x8::gather(&a, &idx);
