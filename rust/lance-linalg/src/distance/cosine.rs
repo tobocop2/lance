@@ -385,34 +385,55 @@ fn cosine_with_norms_f32_simd_other(x: &[f32], x_norm: f32, y_norm: f32, y: &[f3
 impl Cosine for f64 {
     #[inline]
     fn cosine_fast(x: &[Self], x_norm: f32, y: &[Self]) -> f32 {
-        use crate::simd::f64::{f64x4, f64x8};
-        use crate::simd::{FloatSimd, SIMD};
+        #[cfg(target_arch = "x86_64")]
+        {
+            match *SIMD_SUPPORT {
+                SimdSupport::Avx2 | SimdSupport::Avx512 | SimdSupport::Avx512FP16 => unsafe {
+                    f64_x86::cosine_fast_avx2(x, x_norm, y)
+                },
+                _ => cosine_scalar(x, x_norm, y),
+            }
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            cosine_fast_f64_simd_other(x, x_norm, y)
+        }
+    }
+}
 
+/// AVX2 + FMA implementation of the f64 cosine_fast kernel.
+///
+/// Carries `#[target_feature(enable = "avx,avx2,fma")]` so the SIMD primitives
+/// in `crate::simd::f64` (which use raw AVX intrinsics) inline correctly even
+/// when the compile baseline does not have AVX2 enabled.
+#[cfg(target_arch = "x86_64")]
+mod f64_x86 {
+    use crate::simd::f64::{f64x4, f64x8};
+    use crate::simd::{FloatSimd, SIMD};
+
+    #[target_feature(enable = "avx,avx2,fma")]
+    pub unsafe fn cosine_fast_avx2(x: &[f64], x_norm: f32, y: &[f64]) -> f32 {
         let dim = x.len();
         let unrolled_len = dim / 8 * 8;
         let mut y_norm8 = f64x8::zeros();
         let mut xy8 = f64x8::zeros();
         for i in (0..unrolled_len).step_by(8) {
-            unsafe {
-                let xv = f64x8::load_unaligned(x.as_ptr().add(i));
-                let yv = f64x8::load_unaligned(y.as_ptr().add(i));
-                xy8.multiply_add(xv, yv);
-                y_norm8.multiply_add(yv, yv);
-            }
+            let xv = f64x8::load_unaligned(x.as_ptr().add(i));
+            let yv = f64x8::load_unaligned(y.as_ptr().add(i));
+            xy8.multiply_add(xv, yv);
+            y_norm8.multiply_add(yv, yv);
         }
         let aligned_len = dim / 4 * 4;
         let mut y_norm4 = f64x4::zeros();
         let mut xy4 = f64x4::zeros();
         for i in (unrolled_len..aligned_len).step_by(4) {
-            unsafe {
-                let xv = f64x4::load_unaligned(x.as_ptr().add(i));
-                let yv = f64x4::load_unaligned(y.as_ptr().add(i));
-                xy4.multiply_add(xv, yv);
-                y_norm4.multiply_add(yv, yv);
-            }
+            let xv = f64x4::load_unaligned(x.as_ptr().add(i));
+            let yv = f64x4::load_unaligned(y.as_ptr().add(i));
+            xy4.multiply_add(xv, yv);
+            y_norm4.multiply_add(yv, yv);
         }
-        let tail_y_norm: Self = y[aligned_len..].iter().map(|&v| v * v).sum();
-        let tail_xy: Self = x[aligned_len..]
+        let tail_y_norm: f64 = y[aligned_len..].iter().map(|&v| v * v).sum();
+        let tail_xy: f64 = x[aligned_len..]
             .iter()
             .zip(y[aligned_len..].iter())
             .map(|(&a, &b)| a * b)
@@ -422,6 +443,47 @@ impl Cosine for f64 {
         let xy = (xy8.reduce_sum() + xy4.reduce_sum() + tail_xy) as f32;
         1.0 - xy / x_norm / y_norm_sq.sqrt()
     }
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+#[inline]
+fn cosine_fast_f64_simd_other(x: &[f64], x_norm: f32, y: &[f64]) -> f32 {
+    use crate::simd::f64::{f64x4, f64x8};
+    use crate::simd::{FloatSimd, SIMD};
+
+    let dim = x.len();
+    let unrolled_len = dim / 8 * 8;
+    let mut y_norm8 = f64x8::zeros();
+    let mut xy8 = f64x8::zeros();
+    for i in (0..unrolled_len).step_by(8) {
+        unsafe {
+            let xv = f64x8::load_unaligned(x.as_ptr().add(i));
+            let yv = f64x8::load_unaligned(y.as_ptr().add(i));
+            xy8.multiply_add(xv, yv);
+            y_norm8.multiply_add(yv, yv);
+        }
+    }
+    let aligned_len = dim / 4 * 4;
+    let mut y_norm4 = f64x4::zeros();
+    let mut xy4 = f64x4::zeros();
+    for i in (unrolled_len..aligned_len).step_by(4) {
+        unsafe {
+            let xv = f64x4::load_unaligned(x.as_ptr().add(i));
+            let yv = f64x4::load_unaligned(y.as_ptr().add(i));
+            xy4.multiply_add(xv, yv);
+            y_norm4.multiply_add(yv, yv);
+        }
+    }
+    let tail_y_norm: f64 = y[aligned_len..].iter().map(|&v| v * v).sum();
+    let tail_xy: f64 = x[aligned_len..]
+        .iter()
+        .zip(y[aligned_len..].iter())
+        .map(|(&a, &b)| a * b)
+        .sum();
+
+    let y_norm_sq = (y_norm8.reduce_sum() + y_norm4.reduce_sum() + tail_y_norm) as f32;
+    let xy = (xy8.reduce_sum() + xy4.reduce_sum() + tail_xy) as f32;
+    1.0 - xy / x_norm / y_norm_sq.sqrt()
 }
 
 /// Fallback non-SIMD implementation
@@ -686,6 +748,23 @@ mod tests {
             let y_norm = norm_l2(&y);
             let scalar = cosine_scalar_fast(&x, x_norm, &y, y_norm);
             let simd = <f32 as Cosine>::cosine_with_norms(&x, x_norm, y_norm, &y);
+            prop_assert!(approx::relative_eq!(scalar, simd, max_relative = 1e-5));
+        }
+
+        /// Cross-backend parity for the f64 cosine_fast kernel. The scalar
+        /// fallback (`cosine_scalar`) routes through `dot::<f64>::dot` (which
+        /// itself dispatches), while the SIMD path uses `f64x4` / `f64x8`
+        /// primitives. They must agree within numerical tolerance.
+        #[cfg(target_arch = "x86_64")]
+        #[test]
+        fn test_cosine_fast_f64_scalar_simd_parity(
+            (x, y) in arbitrary_vector_pair(arbitrary_f64, 4..4048)
+        ) {
+            prop_assume!(norm_l2(&x) > 1e-20);
+            prop_assume!(norm_l2(&y) > 1e-20);
+            let x_norm = norm_l2(&x);
+            let scalar = cosine_scalar(&x, x_norm, &y);
+            let simd = <f64 as Cosine>::cosine_fast(&x, x_norm, &y);
             prop_assert!(approx::relative_eq!(scalar, simd, max_relative = 1e-5));
         }
     }
