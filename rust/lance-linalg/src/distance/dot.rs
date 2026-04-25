@@ -14,9 +14,8 @@ use arrow_schema::DataType;
 use half::{bf16, f16};
 use lance_arrow::{ArrowFloatType, FixedSizeListArrayExt, FloatArray};
 use lance_core::assume_eq;
-use lance_core::utils::cpu::SIMD_SUPPORT;
-#[cfg(feature = "fp16kernels")]
-use lance_core::utils::cpu::SimdSupport;
+#[allow(unused_imports)]
+use lance_core::utils::cpu::{SIMD_SUPPORT, SimdSupport};
 use num_traits::{AsPrimitive, Num, real::Real};
 
 use crate::Result;
@@ -195,9 +194,82 @@ impl Dot for f64 {
     }
 }
 
-/// Explicit SIMD dot product for f64.
+/// Dot product for f64. Runtime-dispatched to the best available backend.
+///
+/// On x86_64, dispatches via `SIMD_SUPPORT` to either an AVX2-targeted
+/// kernel (which carries `#[target_feature(enable = "avx,avx2,fma")]` so it
+/// stays correct under any compile baseline) or a portable scalar fallback.
+/// On aarch64 and loongarch64, the SIMD primitives in `crate::simd::f64` are
+/// unconditionally backed by NEON / LSX-LASX respectively, so no runtime gate
+/// is required.
 #[inline]
 fn dot_f64_simd(x: &[f64], y: &[f64]) -> f32 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        match *SIMD_SUPPORT {
+            SimdSupport::Avx2 | SimdSupport::Avx512 | SimdSupport::Avx512FP16 => unsafe {
+                x86::dot_f64_avx2(x, y)
+            },
+            _ => dot_f64_scalar(x, y),
+        }
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        dot_f64_simd_other(x, y)
+    }
+}
+
+/// Portable scalar dot product for f64. Used as the x86_64 fallback when no
+/// AVX2 is detected, and exposed for cross-backend parity testing.
+#[cfg(target_arch = "x86_64")]
+#[inline]
+fn dot_f64_scalar(x: &[f64], y: &[f64]) -> f32 {
+    x.iter().zip(y.iter()).map(|(&a, &b)| a * b).sum::<f64>() as f32
+}
+
+#[cfg(target_arch = "x86_64")]
+mod x86 {
+    use crate::simd::f64::{f64x4, f64x8};
+    use crate::simd::{FloatSimd, SIMD};
+
+    /// AVX2 + FMA dot product for f64. Two-level unrolling: f64x8 main loop,
+    /// f64x4 remainder, scalar tail.
+    ///
+    /// Caller must ensure the host supports AVX2 + FMA (gated by the
+    /// `SIMD_SUPPORT` match in `super::dot_f64_simd`).
+    #[target_feature(enable = "avx,avx2,fma")]
+    pub unsafe fn dot_f64_avx2(x: &[f64], y: &[f64]) -> f32 {
+        let dim = x.len();
+        let unrolled_len = dim / 8 * 8;
+
+        let mut acc8 = f64x8::zeros();
+        for i in (0..unrolled_len).step_by(8) {
+            let a = f64x8::load_unaligned(x.as_ptr().add(i));
+            let b = f64x8::load_unaligned(y.as_ptr().add(i));
+            acc8.multiply_add(a, b);
+        }
+
+        let aligned_len = dim / 4 * 4;
+        let mut acc4 = f64x4::zeros();
+        for i in (unrolled_len..aligned_len).step_by(4) {
+            let a = f64x4::load_unaligned(x.as_ptr().add(i));
+            let b = f64x4::load_unaligned(y.as_ptr().add(i));
+            acc4.multiply_add(a, b);
+        }
+
+        let tail: f64 = x[aligned_len..]
+            .iter()
+            .zip(y[aligned_len..].iter())
+            .map(|(&a, &b)| a * b)
+            .sum();
+
+        (acc8.reduce_sum() + acc4.reduce_sum() + tail) as f32
+    }
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+#[inline]
+fn dot_f64_simd_other(x: &[f64], y: &[f64]) -> f32 {
     use crate::simd::f64::{f64x4, f64x8};
     use crate::simd::{FloatSimd, SIMD};
 
@@ -425,6 +497,20 @@ mod tests {
         #[test]
         fn test_dot_f64((x, y) in arbitrary_vector_pair(arbitrary_f64, 4..4048)){
             do_dot_test(&x, &y)?;
+        }
+
+        /// Cross-backend parity: scalar fallback must match the dispatched
+        /// SIMD path within numerical tolerance. Exercises `dot_f64_scalar`
+        /// directly so future baseline-lowering work has CI coverage of the
+        /// fallback path before any global RUSTFLAGS change.
+        #[cfg(target_arch = "x86_64")]
+        #[test]
+        fn test_dot_f64_scalar_simd_parity(
+            (x, y) in arbitrary_vector_pair(arbitrary_f64, 4..4048)
+        ) {
+            let scalar = dot_f64_scalar(&x, &y);
+            let simd = dot_f64_simd(&x, &y);
+            prop_assert!(approx::relative_eq!(scalar, simd, max_relative = 1e-6));
         }
     }
 }
