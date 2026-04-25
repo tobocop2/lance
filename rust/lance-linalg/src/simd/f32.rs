@@ -61,8 +61,12 @@ impl f32x8 {
                 return unsafe { gather_x86::gather_avx2(slice, indices) };
             }
         }
-        // Portable scalar fallback. Used on aarch64, loongarch64, and any
-        // x86_64 host without AVX2.
+        // Scalar gather followed by a 256-bit vector load. On x86_64 the
+        // closing `Self::load_unaligned` lowers to `_mm256_loadu_ps`,
+        // which itself requires AVX — but `f32x8` is `__m256` on x86_64
+        // and so cannot exist on a non-AVX host anyway. In practice this
+        // branch only fires on aarch64 and loongarch64 (where the AVX2
+        // detection above is a no-op).
         let ptr = slice.as_ptr();
         let values = unsafe {
             [
