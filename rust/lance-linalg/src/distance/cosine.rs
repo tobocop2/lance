@@ -784,6 +784,23 @@ mod tests {
         Ok(())
     }
 
+    /// Hand-rolled, dispatch-free scalar reference for the f64
+    /// `cosine_fast` kernel. Mirrors the SIMD computation order:
+    /// accumulate `xy` and `y_norm_sq` as f64, cast to f32 only at the
+    /// final step, then `1 - xy / x_norm / y_norm_sq.sqrt()`. Avoids
+    /// routing through `dot::<f64>::dot`, which itself runtime-dispatches
+    /// to AVX2 on AVX2-capable hosts and would make the parity test
+    /// trivially compare AVX2 to AVX2. The f32 variants of `cosine_scalar`
+    /// stay routed through `<f32 as Dot>::dot`, which is `dot_scalar` (a
+    /// genuinely scalar, auto-vectorisable loop with no runtime
+    /// dispatch), so they don't need a hand-rolled reference.
+    #[cfg(target_arch = "x86_64")]
+    fn cosine_fast_f64_scalar_reference(x: &[f64], x_norm: f32, y: &[f64]) -> f32 {
+        let xy: f64 = x.iter().zip(y.iter()).map(|(&a, &b)| a * b).sum();
+        let y_norm_sq: f64 = y.iter().map(|&b| b * b).sum();
+        1.0 - (xy as f32) / x_norm / (y_norm_sq as f32).sqrt()
+    }
+
     proptest::proptest! {
         #[test]
         fn test_cosine_f16((x, y) in arbitrary_vector_pair(arbitrary_f16, 4..4048)) {
@@ -890,10 +907,10 @@ mod tests {
             prop_assert!(approx::relative_eq!(scalar, avx2, max_relative = 1e-5));
         }
 
-        /// Cross-backend parity for the f64 cosine_fast kernel. The scalar
-        /// fallback (`cosine_scalar`) routes through `dot::<f64>::dot` (which
-        /// itself dispatches), while the SIMD path uses `f64x4` / `f64x8`
-        /// primitives. They must agree within numerical tolerance.
+        /// Cross-backend parity for the f64 cosine_fast kernel. Compares the
+        /// hand-rolled, dispatch-free scalar reference against
+        /// `<f64 as Cosine>::cosine_fast`, which itself dispatches via
+        /// `SIMD_SUPPORT`. Both must agree within numerical tolerance.
         #[cfg(target_arch = "x86_64")]
         #[test]
         fn test_cosine_fast_f64_scalar_simd_parity(
@@ -902,7 +919,7 @@ mod tests {
             prop_assume!(norm_l2(&x) > 1e-20);
             prop_assume!(norm_l2(&y) > 1e-20);
             let x_norm = norm_l2(&x);
-            let scalar = cosine_scalar(&x, x_norm, &y);
+            let scalar = cosine_fast_f64_scalar_reference(&x, x_norm, &y);
             let simd = <f64 as Cosine>::cosine_fast(&x, x_norm, &y);
             prop_assert!(approx::relative_eq!(scalar, simd, max_relative = 1e-5));
         }
