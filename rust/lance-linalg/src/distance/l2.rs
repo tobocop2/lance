@@ -712,6 +712,23 @@ mod tests {
             let simd = l2_f64_simd(&x, &y);
             prop_assert!(approx::relative_eq!(scalar, simd, max_relative = 1e-6));
         }
+
+        /// Explicit scalar-vs-AVX2 parity. On a non-AVX2 host the sibling
+        /// dispatch test trivially passes because both sides call the
+        /// scalar fallback; this test forces the AVX2 inner function so
+        /// AVX2 codegen gets exercised on hosts that actually have AVX2.
+        #[cfg(target_arch = "x86_64")]
+        #[test]
+        fn test_l2_f64_scalar_vs_avx2_parity(
+            (x, y) in arbitrary_vector_pair(arbitrary_f64, 4..4048)
+        ) {
+            if !std::is_x86_feature_detected!("avx2") {
+                return Ok(());
+            }
+            let scalar = l2_f64_scalar(&x, &y);
+            let avx2 = unsafe { x86::l2_f64_avx2(&x, &y) };
+            prop_assert!(approx::relative_eq!(scalar, avx2, max_relative = 1e-6));
+        }
     }
 
     #[test]

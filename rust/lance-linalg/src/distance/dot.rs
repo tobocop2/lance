@@ -512,5 +512,25 @@ mod tests {
             let simd = dot_f64_simd(&x, &y);
             prop_assert!(approx::relative_eq!(scalar, simd, max_relative = 1e-6));
         }
+
+        /// Explicit scalar-vs-AVX2 parity. The sibling
+        /// `test_dot_f64_scalar_simd_parity` test trivially passes on a
+        /// non-AVX2 host (e.g. the qemu-Nehalem CI runner) because the SIMD
+        /// dispatcher takes the scalar fallback there — both sides of the
+        /// assertion call `dot_f64_scalar`. This test forces the AVX2 inner
+        /// function on hosts that actually have AVX2 so the AVX2 codegen
+        /// gets exercised in CI.
+        #[cfg(target_arch = "x86_64")]
+        #[test]
+        fn test_dot_f64_scalar_vs_avx2_parity(
+            (x, y) in arbitrary_vector_pair(arbitrary_f64, 4..4048)
+        ) {
+            if !std::is_x86_feature_detected!("avx2") {
+                return Ok(());
+            }
+            let scalar = dot_f64_scalar(&x, &y);
+            let avx2 = unsafe { x86::dot_f64_avx2(&x, &y) };
+            prop_assert!(approx::relative_eq!(scalar, avx2, max_relative = 1e-6));
+        }
     }
 }

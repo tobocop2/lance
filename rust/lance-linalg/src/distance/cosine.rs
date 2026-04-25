@@ -256,7 +256,7 @@ mod f32 {
     }
 
     #[cfg(target_arch = "x86_64")]
-    mod cosine_once_x86 {
+    pub(super) mod cosine_once_x86 {
         use super::{f32x8, f32x16};
         use crate::simd::SIMD;
 
@@ -832,6 +832,27 @@ mod tests {
             prop_assert!(approx::relative_eq!(scalar, simd, max_relative = 1e-5));
         }
 
+        /// Explicit scalar-vs-AVX2 parity for the f32 cosine_fast kernel.
+        /// On a non-AVX2 host the dispatch test trivially passes because
+        /// the SIMD path falls back to scalar; this test forces the AVX2
+        /// inner function so AVX2 codegen is exercised on hosts that have
+        /// AVX2.
+        #[cfg(target_arch = "x86_64")]
+        #[test]
+        fn test_cosine_fast_f32_scalar_vs_avx2_parity(
+            (x, y) in arbitrary_vector_pair(arbitrary_f32, 4..4048)
+        ) {
+            if !std::is_x86_feature_detected!("avx2") {
+                return Ok(());
+            }
+            prop_assume!(norm_l2(&x) > 1e-10);
+            prop_assume!(norm_l2(&y) > 1e-10);
+            let x_norm = norm_l2(&x);
+            let scalar = cosine_scalar(&x, x_norm, &y);
+            let avx2 = unsafe { f32_x86::cosine_fast_avx2(&x, x_norm, &y) };
+            prop_assert!(approx::relative_eq!(scalar, avx2, max_relative = 1e-5));
+        }
+
         /// Cross-backend parity for the f32 cosine_with_norms kernel. The
         /// scalar fallback (`cosine_scalar_fast`) and the SIMD path must
         /// agree within numerical tolerance.
@@ -849,6 +870,26 @@ mod tests {
             prop_assert!(approx::relative_eq!(scalar, simd, max_relative = 1e-5));
         }
 
+        /// Explicit scalar-vs-AVX2 parity for the f32 cosine_with_norms
+        /// kernel. Forces the AVX2 inner function on AVX2-capable hosts so
+        /// the dispatch test isn't trivially passing under qemu-Nehalem.
+        #[cfg(target_arch = "x86_64")]
+        #[test]
+        fn test_cosine_with_norms_f32_scalar_vs_avx2_parity(
+            (x, y) in arbitrary_vector_pair(arbitrary_f32, 4..4048)
+        ) {
+            if !std::is_x86_feature_detected!("avx2") {
+                return Ok(());
+            }
+            prop_assume!(norm_l2(&x) > 1e-10);
+            prop_assume!(norm_l2(&y) > 1e-10);
+            let x_norm = norm_l2(&x);
+            let y_norm = norm_l2(&y);
+            let scalar = cosine_scalar_fast(&x, x_norm, &y, y_norm);
+            let avx2 = unsafe { f32_x86::cosine_with_norms_avx2(&x, x_norm, y_norm, &y) };
+            prop_assert!(approx::relative_eq!(scalar, avx2, max_relative = 1e-5));
+        }
+
         /// Cross-backend parity for the f64 cosine_fast kernel. The scalar
         /// fallback (`cosine_scalar`) routes through `dot::<f64>::dot` (which
         /// itself dispatches), while the SIMD path uses `f64x4` / `f64x8`
@@ -864,6 +905,24 @@ mod tests {
             let scalar = cosine_scalar(&x, x_norm, &y);
             let simd = <f64 as Cosine>::cosine_fast(&x, x_norm, &y);
             prop_assert!(approx::relative_eq!(scalar, simd, max_relative = 1e-5));
+        }
+
+        /// Explicit scalar-vs-AVX2 parity for the f64 cosine_fast kernel.
+        /// Forces the AVX2 inner function on AVX2-capable hosts.
+        #[cfg(target_arch = "x86_64")]
+        #[test]
+        fn test_cosine_fast_f64_scalar_vs_avx2_parity(
+            (x, y) in arbitrary_vector_pair(arbitrary_f64, 4..4048)
+        ) {
+            if !std::is_x86_feature_detected!("avx2") {
+                return Ok(());
+            }
+            prop_assume!(norm_l2(&x) > 1e-20);
+            prop_assume!(norm_l2(&y) > 1e-20);
+            let x_norm = norm_l2(&x);
+            let scalar = cosine_scalar(&x, x_norm, &y);
+            let avx2 = unsafe { f64_x86::cosine_fast_avx2(&x, x_norm, &y) };
+            prop_assert!(approx::relative_eq!(scalar, avx2, max_relative = 1e-5));
         }
 
         /// Cross-backend parity for the despecialized cosine_once_8 kernel.
@@ -884,6 +943,28 @@ mod tests {
             prop_assert!(approx::relative_eq!(scalar, simd, max_relative = 1e-5));
         }
 
+        /// Explicit scalar-vs-AVX2 parity for cosine_once_8.
+        #[cfg(target_arch = "x86_64")]
+        #[test]
+        fn test_cosine_once_8_scalar_vs_avx2_parity(
+            x in proptest::array::uniform8(arbitrary_f32()),
+            y in proptest::array::uniform8(arbitrary_f32()),
+        ) {
+            if !std::is_x86_feature_detected!("avx2") {
+                return Ok(());
+            }
+            let xs: Vec<f32> = x.to_vec();
+            let ys: Vec<f32> = y.to_vec();
+            prop_assume!(norm_l2(&xs) > 1e-10);
+            prop_assume!(norm_l2(&ys) > 1e-10);
+            let x_norm = norm_l2(&xs);
+            let scalar = super::f32::cosine_once_8_scalar(&xs, x_norm, &ys);
+            let avx2 = unsafe {
+                super::f32::cosine_once_x86::cosine_once_8_avx2(&xs, x_norm, &ys)
+            };
+            prop_assert!(approx::relative_eq!(scalar, avx2, max_relative = 1e-5));
+        }
+
         /// Cross-backend parity for the despecialized cosine_once_16 kernel.
         /// Replaces the previous generic `cosine_once<f32x16, 16>` invocation.
         #[cfg(target_arch = "x86_64")]
@@ -900,6 +981,28 @@ mod tests {
             let scalar = super::f32::cosine_once_16_scalar(&xs, x_norm, &ys);
             let simd = super::f32::cosine_once_16(&xs, x_norm, &ys);
             prop_assert!(approx::relative_eq!(scalar, simd, max_relative = 1e-5));
+        }
+
+        /// Explicit scalar-vs-AVX2 parity for cosine_once_16.
+        #[cfg(target_arch = "x86_64")]
+        #[test]
+        fn test_cosine_once_16_scalar_vs_avx2_parity(
+            x in proptest::array::uniform16(arbitrary_f32()),
+            y in proptest::array::uniform16(arbitrary_f32()),
+        ) {
+            if !std::is_x86_feature_detected!("avx2") {
+                return Ok(());
+            }
+            let xs: Vec<f32> = x.to_vec();
+            let ys: Vec<f32> = y.to_vec();
+            prop_assume!(norm_l2(&xs) > 1e-10);
+            prop_assume!(norm_l2(&ys) > 1e-10);
+            let x_norm = norm_l2(&xs);
+            let scalar = super::f32::cosine_once_16_scalar(&xs, x_norm, &ys);
+            let avx2 = unsafe {
+                super::f32::cosine_once_x86::cosine_once_16_avx2(&xs, x_norm, &ys)
+            };
+            prop_assert!(approx::relative_eq!(scalar, avx2, max_relative = 1e-5));
         }
     }
 }
