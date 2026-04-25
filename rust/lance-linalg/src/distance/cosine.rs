@@ -22,6 +22,7 @@ use lance_core::utils::cpu::{SIMD_SUPPORT, SimdSupport};
 
 use super::{Dot, norm_l2::norm_l2};
 use super::{Normalize, dot::dot};
+#[allow(unused_imports)]
 use crate::simd::{
     FloatSimd, SIMD,
     f32::{f32x8, f32x16},
@@ -183,21 +184,118 @@ impl Cosine for f16 {
     }
 }
 
-/// f32 kernels for Cosine
+/// f32 single-vector cosine helpers used by `cosine_batch` for fixed
+/// dimensions 8 and 16.
+///
+/// These were previously a single generic `cosine_once<S, N>` but the
+/// monomorphizations have to dispatch on `SIMD_SUPPORT` for the SIMD path
+/// to stay correct under any compile baseline. Splitting them into two
+/// concrete entry points keeps the dispatch site flat and lets each width
+/// route to a `#[target_feature]` AVX2 inner function.
 mod f32 {
     use super::*;
 
-    // TODO: how can we explicitly infer N?
     #[inline]
-    pub(super) fn cosine_once<S: SIMD<f32, N>, const N: usize>(
-        x: &[f32],
-        x_norm: f32,
-        y: &[f32],
-    ) -> f32 {
-        let x = unsafe { S::load_unaligned(x.as_ptr()) };
-        let y = unsafe { S::load_unaligned(y.as_ptr()) };
-        let y2 = y * y;
-        let xy = x * y;
+    pub(super) fn cosine_once_8(x: &[f32], x_norm: f32, y: &[f32]) -> f32 {
+        #[cfg(target_arch = "x86_64")]
+        {
+            match *SIMD_SUPPORT {
+                SimdSupport::Avx2 | SimdSupport::Avx512 | SimdSupport::Avx512FP16 => unsafe {
+                    cosine_once_x86::cosine_once_8_avx2(x, x_norm, y)
+                },
+                _ => cosine_once_8_scalar(x, x_norm, y),
+            }
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            cosine_once_8_other(x, x_norm, y)
+        }
+    }
+
+    #[inline]
+    pub(super) fn cosine_once_16(x: &[f32], x_norm: f32, y: &[f32]) -> f32 {
+        #[cfg(target_arch = "x86_64")]
+        {
+            match *SIMD_SUPPORT {
+                SimdSupport::Avx2 | SimdSupport::Avx512 | SimdSupport::Avx512FP16 => unsafe {
+                    cosine_once_x86::cosine_once_16_avx2(x, x_norm, y)
+                },
+                _ => cosine_once_16_scalar(x, x_norm, y),
+            }
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            cosine_once_16_other(x, x_norm, y)
+        }
+    }
+
+    /// Portable scalar `cosine_once` for length-8 vectors. Matches the SIMD
+    /// path modulo summation order.
+    #[cfg(target_arch = "x86_64")]
+    #[inline]
+    pub(super) fn cosine_once_8_scalar(x: &[f32], x_norm: f32, y: &[f32]) -> f32 {
+        let mut xy = 0.0f32;
+        let mut y2 = 0.0f32;
+        for i in 0..8 {
+            xy += x[i] * y[i];
+            y2 += y[i] * y[i];
+        }
+        1.0 - xy / x_norm / y2.sqrt()
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[inline]
+    pub(super) fn cosine_once_16_scalar(x: &[f32], x_norm: f32, y: &[f32]) -> f32 {
+        let mut xy = 0.0f32;
+        let mut y2 = 0.0f32;
+        for i in 0..16 {
+            xy += x[i] * y[i];
+            y2 += y[i] * y[i];
+        }
+        1.0 - xy / x_norm / y2.sqrt()
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    mod cosine_once_x86 {
+        use super::{f32x8, f32x16};
+        use crate::simd::SIMD;
+
+        #[target_feature(enable = "avx,avx2,fma")]
+        pub unsafe fn cosine_once_8_avx2(x: &[f32], x_norm: f32, y: &[f32]) -> f32 {
+            let xv = f32x8::load_unaligned(x.as_ptr());
+            let yv = f32x8::load_unaligned(y.as_ptr());
+            let y2 = yv * yv;
+            let xy = xv * yv;
+            1.0 - xy.reduce_sum() / x_norm / y2.reduce_sum().sqrt()
+        }
+
+        #[target_feature(enable = "avx,avx2,fma")]
+        pub unsafe fn cosine_once_16_avx2(x: &[f32], x_norm: f32, y: &[f32]) -> f32 {
+            let xv = f32x16::load_unaligned(x.as_ptr());
+            let yv = f32x16::load_unaligned(y.as_ptr());
+            let y2 = yv * yv;
+            let xy = xv * yv;
+            1.0 - xy.reduce_sum() / x_norm / y2.reduce_sum().sqrt()
+        }
+    }
+
+    #[cfg(not(target_arch = "x86_64"))]
+    #[inline]
+    fn cosine_once_8_other(x: &[f32], x_norm: f32, y: &[f32]) -> f32 {
+        let xv = unsafe { f32x8::load_unaligned(x.as_ptr()) };
+        let yv = unsafe { f32x8::load_unaligned(y.as_ptr()) };
+        let y2 = yv * yv;
+        let xy = xv * yv;
+        1.0 - xy.reduce_sum() / x_norm / y2.reduce_sum().sqrt()
+    }
+
+    #[cfg(not(target_arch = "x86_64"))]
+    #[inline]
+    fn cosine_once_16_other(x: &[f32], x_norm: f32, y: &[f32]) -> f32 {
+        let xv = unsafe { f32x16::load_unaligned(x.as_ptr()) };
+        let yv = unsafe { f32x16::load_unaligned(y.as_ptr()) };
+        let y2 = yv * yv;
+        let xy = xv * yv;
         1.0 - xy.reduce_sum() / x_norm / y2.reduce_sum().sqrt()
     }
 }
@@ -248,12 +346,12 @@ impl Cosine for f32 {
             8 => Box::new(
                 batch
                     .chunks_exact(dimension)
-                    .map(move |y| f32::cosine_once::<f32x8, 8>(x, x_norm, y)),
+                    .map(move |y| f32::cosine_once_8(x, x_norm, y)),
             ),
             16 => Box::new(
                 batch
                     .chunks_exact(dimension)
-                    .map(move |y| f32::cosine_once::<f32x16, 16>(x, x_norm, y)),
+                    .map(move |y| f32::cosine_once_16(x, x_norm, y)),
             ),
             _ => Box::new(
                 batch
@@ -765,6 +863,42 @@ mod tests {
             let x_norm = norm_l2(&x);
             let scalar = cosine_scalar(&x, x_norm, &y);
             let simd = <f64 as Cosine>::cosine_fast(&x, x_norm, &y);
+            prop_assert!(approx::relative_eq!(scalar, simd, max_relative = 1e-5));
+        }
+
+        /// Cross-backend parity for the despecialized cosine_once_8 kernel.
+        /// Replaces the previous generic `cosine_once<f32x8, 8>` invocation.
+        #[cfg(target_arch = "x86_64")]
+        #[test]
+        fn test_cosine_once_8_scalar_simd_parity(
+            x in proptest::array::uniform8(arbitrary_f32()),
+            y in proptest::array::uniform8(arbitrary_f32()),
+        ) {
+            let xs: Vec<f32> = x.to_vec();
+            let ys: Vec<f32> = y.to_vec();
+            prop_assume!(norm_l2(&xs) > 1e-10);
+            prop_assume!(norm_l2(&ys) > 1e-10);
+            let x_norm = norm_l2(&xs);
+            let scalar = super::f32::cosine_once_8_scalar(&xs, x_norm, &ys);
+            let simd = super::f32::cosine_once_8(&xs, x_norm, &ys);
+            prop_assert!(approx::relative_eq!(scalar, simd, max_relative = 1e-5));
+        }
+
+        /// Cross-backend parity for the despecialized cosine_once_16 kernel.
+        /// Replaces the previous generic `cosine_once<f32x16, 16>` invocation.
+        #[cfg(target_arch = "x86_64")]
+        #[test]
+        fn test_cosine_once_16_scalar_simd_parity(
+            x in proptest::array::uniform16(arbitrary_f32()),
+            y in proptest::array::uniform16(arbitrary_f32()),
+        ) {
+            let xs: Vec<f32> = x.to_vec();
+            let ys: Vec<f32> = y.to_vec();
+            prop_assume!(norm_l2(&xs) > 1e-10);
+            prop_assume!(norm_l2(&ys) > 1e-10);
+            let x_norm = norm_l2(&xs);
+            let scalar = super::f32::cosine_once_16_scalar(&xs, x_norm, &ys);
+            let simd = super::f32::cosine_once_16(&xs, x_norm, &ys);
             prop_assert!(approx::relative_eq!(scalar, simd, max_relative = 1e-5));
         }
     }
