@@ -56,6 +56,7 @@ impl<'a> From<&'a [f64; 4]> for f64x4 {
 }
 
 impl SIMD<f64, 4> for f64x4 {
+    #[inline]
     fn splat(val: f64) -> Self {
         #[cfg(target_arch = "x86_64")]
         unsafe {
@@ -71,6 +72,7 @@ impl SIMD<f64, 4> for f64x4 {
         }
     }
 
+    #[inline]
     fn zeros() -> Self {
         #[cfg(target_arch = "x86_64")]
         unsafe {
@@ -171,6 +173,7 @@ impl SIMD<f64, 4> for f64x4 {
         }
     }
 
+    #[inline]
     fn reduce_min(&self) -> f64 {
         #[cfg(target_arch = "x86_64")]
         unsafe {
@@ -196,6 +199,7 @@ impl SIMD<f64, 4> for f64x4 {
         }
     }
 
+    #[inline]
     fn min(&self, rhs: &Self) -> Self {
         #[cfg(target_arch = "x86_64")]
         unsafe {
@@ -214,6 +218,7 @@ impl SIMD<f64, 4> for f64x4 {
         }
     }
 
+    #[inline]
     fn find(&self, val: f64) -> Option<i32> {
         unsafe {
             for i in 0..4 {
@@ -227,6 +232,7 @@ impl SIMD<f64, 4> for f64x4 {
 }
 
 impl FloatSimd<f64, 4> for f64x4 {
+    #[inline]
     fn multiply_add(&mut self, a: Self, b: Self) {
         #[cfg(target_arch = "x86_64")]
         unsafe {
