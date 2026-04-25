@@ -46,22 +46,26 @@ impl std::fmt::Debug for f32x8 {
 }
 
 impl f32x8 {
+    /// Gather 8 `f32` values from `slice` at the byte-scaled positions
+    /// described by `indices`.
+    ///
+    /// On x86_64 hosts with AVX2, dispatches to `_mm256_i32gather_ps` via a
+    /// `#[target_feature]`-annotated inner function so the AVX2 instruction
+    /// stays correct under any compile baseline. Other architectures (and
+    /// pre-AVX2 x86_64) fall back to a portable scalar gather.
     #[inline]
     pub fn gather(slice: &[f32], indices: &[i32; 8]) -> Self {
         #[cfg(target_arch = "x86_64")]
-        unsafe {
-            use super::i32::i32x8;
-
-            let idx = i32x8::from(indices);
-            Self(_mm256_i32gather_ps::<4>(slice.as_ptr(), idx.0))
+        {
+            if is_x86_feature_detected!("avx2") {
+                return unsafe { gather_x86::gather_avx2(slice, indices) };
+            }
         }
-
-        #[cfg(target_arch = "aarch64")]
-        unsafe {
-            // aarch64 does not have relevant SIMD instructions.
-            let ptr = slice.as_ptr();
-
-            let values = [
+        // Portable scalar fallback. Used on aarch64, loongarch64, and any
+        // x86_64 host without AVX2.
+        let ptr = slice.as_ptr();
+        let values = unsafe {
+            [
                 *ptr.add(indices[0] as usize),
                 *ptr.add(indices[1] as usize),
                 *ptr.add(indices[2] as usize),
@@ -70,27 +74,25 @@ impl f32x8 {
                 *ptr.add(indices[5] as usize),
                 *ptr.add(indices[6] as usize),
                 *ptr.add(indices[7] as usize),
-            ];
-            Self::load_unaligned(values.as_ptr())
-        }
+            ]
+        };
+        unsafe { Self::load_unaligned(values.as_ptr()) }
+    }
+}
 
-        #[cfg(target_arch = "loongarch64")]
-        unsafe {
-            // loongarch64 does not have relevant SIMD instructions.
-            let ptr = slice.as_ptr();
+#[cfg(target_arch = "x86_64")]
+mod gather_x86 {
+    use super::*;
 
-            let values = [
-                *ptr.add(indices[0] as usize),
-                *ptr.add(indices[1] as usize),
-                *ptr.add(indices[2] as usize),
-                *ptr.add(indices[3] as usize),
-                *ptr.add(indices[4] as usize),
-                *ptr.add(indices[5] as usize),
-                *ptr.add(indices[6] as usize),
-                *ptr.add(indices[7] as usize),
-            ];
-            Self::load_unaligned(values.as_ptr())
-        }
+    /// AVX2 gather via `_mm256_i32gather_ps`. Caller must ensure the host
+    /// supports AVX2 (gated by `is_x86_feature_detected!("avx2")` in
+    /// `f32x8::gather`).
+    #[target_feature(enable = "avx2")]
+    pub unsafe fn gather_avx2(slice: &[f32], indices: &[i32; 8]) -> f32x8 {
+        use super::super::i32::i32x8;
+
+        let idx = i32x8::from(indices);
+        f32x8(_mm256_i32gather_ps::<4>(slice.as_ptr(), idx.0))
     }
 }
 
