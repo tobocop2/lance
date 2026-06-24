@@ -46,7 +46,6 @@ use crate::scalar::{
     AnyQuery, BuiltinIndexType, CreatedIndex, IndexFile, IndexStore, OldIndexDataFilter,
     ScalarIndex, ScalarIndexParams, SearchResult, TextQuery, UpdateCriteria,
 };
-use crate::vector::VectorIndex;
 use crate::{Index, IndexType};
 
 const FMINDEX_INDEX_VERSION: u32 = 10;
@@ -1295,11 +1294,6 @@ impl Index for FMIndexScalarIndex {
     fn as_index(self: Arc<Self>) -> Arc<dyn Index> {
         self
     }
-    fn as_vector_index(self: Arc<Self>) -> Result<Arc<dyn VectorIndex>> {
-        Err(Error::invalid_input_source(
-            "Fm is not a vector index".into(),
-        ))
-    }
     async fn prewarm(&self) -> Result<()> {
         Ok(())
     }
@@ -1378,7 +1372,7 @@ impl ScalarIndex for FMIndexScalarIndex {
     ) -> Result<CreatedIndex> {
         let files = write_partitioned_fmindex_stream(new_data, dest).await?;
         Ok(CreatedIndex {
-            index_details: prost_types::Any::from_msg(&pb::FmIndexIndexDetails {}).unwrap(),
+            index_details: prost_types::Any::from_msg(&pb::FmIndexDetails {}).unwrap(),
             index_version: FMINDEX_INDEX_VERSION,
             files,
         })
@@ -1708,7 +1702,7 @@ impl ScalarIndexPlugin for FMIndexPlugin {
     ) -> Result<CreatedIndex> {
         let files = write_partitioned_fmindex_stream(data, store).await?;
         Ok(CreatedIndex {
-            index_details: prost_types::Any::from_msg(&pb::FmIndexIndexDetails {}).unwrap(),
+            index_details: prost_types::Any::from_msg(&pb::FmIndexDetails {}).unwrap(),
             index_version: FMINDEX_INDEX_VERSION,
             files,
         })
@@ -1740,9 +1734,7 @@ impl ScalarIndexPlugin for FMIndexPlugin {
         fri: Option<Arc<FragReuseIndex>>,
         cache: &LanceCache,
     ) -> Result<Arc<dyn ScalarIndex>> {
-        let _ = details
-            .to_msg::<pb::FmIndexIndexDetails>()
-            .unwrap_or_default();
+        let _ = details.to_msg::<pb::FmIndexDetails>().unwrap_or_default();
         Ok(FMIndexScalarIndex::load(store, fri, cache).await? as Arc<dyn ScalarIndex>)
     }
     async fn load_statistics(

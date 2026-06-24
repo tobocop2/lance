@@ -2859,7 +2859,7 @@ checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
 
 [[package]]
 name = "fsst"
-version = "8.1.0-beta.0"
+version = "9.0.0-beta.6"
 dependencies = [
  "arrow-array",
  "rand 0.9.4",
@@ -3861,15 +3861,6 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
@@ -4067,7 +4058,7 @@ checksum = "e037a2e1d8d5fdbd49b16a4ea09d5d6401c1f29eca5ff29d03d3824dba16256a"
 
 [[package]]
 name = "lance"
-version = "8.1.0-beta.0"
+version = "9.0.0-beta.6"
 dependencies = [
  "arc-swap",
  "arrow",
@@ -4102,7 +4093,7 @@ dependencies = [
  "futures",
  "half",
  "humantime",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "lance-arrow",
  "lance-core",
  "lance-datafusion",
@@ -4141,7 +4132,7 @@ dependencies = [
 
 [[package]]
 name = "lance-arrow"
-version = "8.1.0-beta.0"
+version = "9.0.0-beta.6"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -4183,7 +4174,7 @@ dependencies = [
 
 [[package]]
 name = "lance-bitpacking"
-version = "8.1.0-beta.0"
+version = "9.0.0-beta.6"
 dependencies = [
  "arrayref",
  "paste",
@@ -4192,7 +4183,7 @@ dependencies = [
 
 [[package]]
 name = "lance-core"
-version = "8.1.0-beta.0"
+version = "9.0.0-beta.6"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -4204,7 +4195,7 @@ dependencies = [
  "datafusion-common",
  "datafusion-sql",
  "futures",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "lance-arrow",
  "lance-derive",
  "libc",
@@ -4230,7 +4221,7 @@ dependencies = [
 
 [[package]]
 name = "lance-datafusion"
-version = "8.1.0-beta.0"
+version = "9.0.0-beta.6"
 dependencies = [
  "arrow",
  "arrow-array",
@@ -4262,7 +4253,7 @@ dependencies = [
 
 [[package]]
 name = "lance-datagen"
-version = "8.1.0-beta.0"
+version = "9.0.0-beta.6"
 dependencies = [
  "arrow",
  "arrow-array",
@@ -4279,7 +4270,7 @@ dependencies = [
 
 [[package]]
 name = "lance-derive"
-version = "8.1.0-beta.0"
+version = "9.0.0-beta.6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4288,7 +4279,7 @@ dependencies = [
 
 [[package]]
 name = "lance-encoding"
-version = "8.1.0-beta.0"
+version = "9.0.0-beta.6"
 dependencies = [
  "arrow-arith",
  "arrow-array",
@@ -4304,7 +4295,7 @@ dependencies = [
  "futures",
  "hex",
  "hyperloglogplus",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "lance-arrow",
  "lance-bitpacking",
  "lance-core",
@@ -4323,7 +4314,7 @@ dependencies = [
 
 [[package]]
 name = "lance-file"
-version = "8.1.0-beta.0"
+version = "9.0.0-beta.6"
 dependencies = [
  "arrow-arith",
  "arrow-array",
@@ -4353,7 +4344,7 @@ dependencies = [
 
 [[package]]
 name = "lance-geo"
-version = "8.1.0-beta.0"
+version = "9.0.0-beta.6"
 dependencies = [
  "datafusion",
  "geo-traits",
@@ -4367,7 +4358,7 @@ dependencies = [
 
 [[package]]
 name = "lance-index"
-version = "8.1.0-beta.0"
+version = "9.0.0-beta.6"
 dependencies = [
  "arc-swap",
  "arrow",
@@ -4395,7 +4386,7 @@ dependencies = [
  "geoarrow-array",
  "geoarrow-schema",
  "half",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "jieba-rs",
  "jsonb",
  "lance-arrow",
@@ -4436,7 +4427,7 @@ dependencies = [
 
 [[package]]
 name = "lance-io"
-version = "8.1.0-beta.0"
+version = "9.0.0-beta.6"
 dependencies = [
  "arrow",
  "arrow-arith",
@@ -4477,7 +4468,7 @@ dependencies = [
 
 [[package]]
 name = "lance-linalg"
-version = "8.1.0-beta.0"
+version = "9.0.0-beta.6"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -4488,11 +4479,12 @@ dependencies = [
  "lance-core",
  "num-traits",
  "rand 0.9.4",
+ "rayon",
 ]
 
 [[package]]
 name = "lance-namespace"
-version = "8.1.0-beta.0"
+version = "9.0.0-beta.6"
 dependencies = [
  "arrow",
  "async-trait",
@@ -4504,7 +4496,7 @@ dependencies = [
 
 [[package]]
 name = "lance-namespace-impls"
-version = "8.1.0-beta.0"
+version = "9.0.0-beta.6"
 dependencies = [
  "arrow",
  "arrow-ipc",
@@ -4553,14 +4545,14 @@ dependencies = [
 
 [[package]]
 name = "lance-select"
-version = "8.1.0-beta.0"
+version = "9.0.0-beta.6"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
  "arrow-schema",
  "byteorder",
  "bytes",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "lance-core",
  "roaring",
  "tracing",
@@ -4568,7 +4560,7 @@ dependencies = [
 
 [[package]]
 name = "lance-table"
-version = "8.1.0-beta.0"
+version = "9.0.0-beta.6"
 dependencies = [
  "arrow",
  "arrow-array",
@@ -4607,7 +4599,7 @@ dependencies = [
 
 [[package]]
 name = "lance-tokenizer"
-version = "8.1.0-beta.0"
+version = "9.0.0-beta.6"
 dependencies = [
  "icu_segmenter",
  "jieba-rs",
@@ -6045,7 +6037,7 @@ dependencies = [
 
 [[package]]
 name = "pylance"
-version = "8.1.0-beta.0"
+version = "9.0.0-beta.6"
 dependencies = [
  "alloc-stdlib",
  "arrow",
