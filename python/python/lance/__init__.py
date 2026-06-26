@@ -36,6 +36,7 @@ from .lance import (
     ScanStatistics,
     bytes_read_counter,
     iops_counter,
+    simd_info,
 )
 from .mem_wal import (
     ExecutionPlan,
@@ -100,6 +101,7 @@ __all__ = [
     "json_to_schema",
     "schema_to_json",
     "set_logger",
+    "simd_info",
     "write_dataset",
     "FFILanceTableProvider",
     "IndexProgress",
